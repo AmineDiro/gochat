@@ -14,14 +14,17 @@ type Peer struct {
 	Id         uuid.UUID `json:"uuid"`
 	Name       string    `json:"page"`
 	ListenAddr string    `json:"listenAddr"`
-	Version    string    `json:version`
+	Version    string    `json:"version"`
 }
 
 type Server struct {
 	Peer
 	listener net.Listener
-	mu       sync.RWMutex
-	PeerList map[uuid.UUID]*Peer
+
+	mu       sync.Mutex
+	PeerList []*Peer
+	connMap  map[uuid.UUID]*net.Conn
+	tx       chan *Peer
 }
 
 func MkServer(addr string, name string, version string) (s *Server) {
@@ -32,7 +35,9 @@ func MkServer(addr string, name string, version string) (s *Server) {
 			Name:       name,
 			Version:    version,
 		},
-		PeerList: make(map[uuid.UUID]*Peer),
+		PeerList: []*Peer{},
+		connMap:  make(map[uuid.UUID]*net.Conn),
+		tx:       make(chan *Peer),
 	}
 
 	log.WithFields(log.Fields{
@@ -52,19 +57,22 @@ func (s *Server) StartPeer() {
 	s.listener = l
 
 	go s.ListenLoop()
+	go s.broadcastPeerList()
 
-	// go s.status()
+	//TODO : add flag
+	go s.status()
 }
 
 func (s *Server) status() {
-	ticker := time.NewTicker(time.Duration(2) * time.Second)
+	ticker := time.NewTicker(time.Duration(3) * time.Second)
 
 	for range ticker.C {
-		s.mu.RLock()
+		s.mu.Lock()
 		n := len(s.PeerList)
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		log.WithFields(log.Fields{
 			"Id":             s.Id.String()[:5],
+			"PeerName":       s.Name,
 			"ConnectedPeers": n,
 		}).Info("Peer Status")
 	}
@@ -72,9 +80,8 @@ func (s *Server) status() {
 
 func (s *Server) ListenLoop() {
 	log.WithFields(log.Fields{
-		"port":     s.ListenAddr,
 		"listener": s.listener.Addr().String(),
-	}).Info("Listening for new Connections")
+	}).Debug("Listening for new Connections")
 
 	for {
 		conn, err := s.listener.Accept()
@@ -86,34 +93,135 @@ func (s *Server) ListenLoop() {
 		log.WithFields(log.Fields{
 			"remoteAddr": conn.RemoteAddr(),
 			"localAddr":  conn.LocalAddr(),
-		}).Info("Received connection: ")
+		}).Debug("Received connection: ")
 
-		go s.authorizePeer(conn)
+		go s.handleConnection(conn)
 	}
 }
 
-func (s *Server) authorizePeer(conn net.Conn) error {
+func (s *Server) handleConnection(conn net.Conn) error {
+
+	// Authorize Peer
+	p, err := s.authorizePeer(conn)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+
+	if err := s.AddPeer(conn, p); err != nil {
+		panic("Error in adding Peer")
+	}
+
+	// Broadcast Internal PeerList to the connected peer
+	s.tx <- p
+	return nil
+}
+
+func (s *Server) AddPeer(conn net.Conn, p *Peer) error {
+	log.WithFields(log.Fields{
+		"server": s.ListenAddr,
+		"peer":   p.ListenAddr,
+	}).Info("Adding Peer.")
+	s.mu.Lock()
+	s.PeerList = append(s.PeerList, p)
+	s.connMap[p.Id] = &conn
+	s.mu.Unlock()
+	return nil
+
+}
+
+func (s *Server) authorizePeer(conn net.Conn) (*Peer, error) {
 	// Block and wait for response
 	p, err := ReceiveHandshake(conn)
 	if err != nil {
+		return nil, err
+	}
+	if isAuthorized(s, p) {
+		if err := SendHandshake(conn, &s.Peer); err != nil {
+			return nil, err
+		}
+		return p, nil
+	}
+
+	log.WithFields(log.Fields{
+		"peer_id":        p.Id,
+		"peer_version":   p.Version,
+		"server_version": s.Version,
+	}).Errorf("Invalid Peer")
+
+	return nil, fmt.Errorf("invalid Peer")
+}
+
+func (s *Server) broadcastPeerList() {
+	for newPeer := range s.tx {
+		s.mu.Lock()
+		// Send the Server peerlist
+		listAddr := []string{}
+		for _, p := range s.PeerList {
+			if p.ListenAddr != newPeer.ListenAddr {
+				listAddr = append(listAddr, p.ListenAddr)
+			}
+
+		}
+		conn := s.connMap[newPeer.Id]
+		SendPeerList(*conn, listAddr)
+		s.mu.Unlock()
+	}
+
+}
+
+func (s *Server) lookupAddr(addr string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.PeerList {
+		if addr == p.ListenAddr {
+			return true
+		}
+	}
+	return false
+
+}
+
+func (s *Server) Connect(addr string) error {
+	if s.lookupAddr(addr) {
+		return nil
+	}
+	conn, err := net.DialTimeout("tcp", addr, time.Second*1)
+	if err != nil {
 		return err
 	}
-	if p.Version == s.Version {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.PeerList[p.Id] = p
-		if err := SendHandshake(conn, &s.Peer); err != nil {
-			return err
-		}
-		go s.handlePeer(conn)
-	} else {
-		log.WithFields(log.Fields{
-			"peer_id":        p.Id,
-			"peer_version":   p.Version,
-			"server_version": s.Version,
-		}).Errorln("Invalid Peer")
+
+	SendHandshake(conn, &s.Peer)
+	p, err := ReceiveHandshake(conn)
+	if err != nil {
+		log.Errorln("%s : Server Closed connection", s.Name)
 		conn.Close()
+		return err
 	}
+
+	s.AddPeer(conn, p)
+
+	peerList, err := ReceivePeerList(conn)
+	if err != nil {
+		// TODO: dunno what would happen here?
+		// Maybe ask later in protocol
+		log.Errorln("%s : Server Closed connection", s.Name)
+		return err
+	}
+
+	log.WithFields(log.Fields{
+		"receiver":          s.Name,
+		"sender":            addr,
+		"received_peerlist": peerList,
+		"memory_peerlist":   s.PeerList,
+	}).Info("PeerList")
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, addr := range peerList {
+		go s.Connect(addr)
+	}
+
 	return nil
 }
 
@@ -126,31 +234,10 @@ func (s *Server) handlePeer(conn net.Conn) {
 			log.Infoln("Connection closed")
 			break
 		}
+		time.Sleep(10 * time.Second)
 		log.Infoln("%v", string(buff))
 		conn.Write([]byte("Hi back!\n"))
 
 	}
 	conn.Close()
-}
-
-func (s *Server) Connect(addr string) error {
-	conn, err := net.DialTimeout("tcp", addr, time.Second*1)
-	if err != nil {
-		return err
-	}
-	SendHandshake(conn, &s.Peer)
-
-	//TODO :
-	// OK from server
-	// Not ok from server conn closed
-	p, err := ReceiveHandshake(conn)
-	if err != nil {
-		conn.Close()
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.PeerList[p.Id] = p
-
-	return nil
 }

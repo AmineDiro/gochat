@@ -3,15 +3,7 @@ package peer
 import (
 	"encoding/json"
 	"net"
-
-	"github.com/google/uuid"
 )
-
-type Handshake struct {
-	id         uuid.UUID `json:"uuid"`
-	name       string    `json:"page"`
-	listenAddr string    `json:"listenAddr"`
-}
 
 func SendHandshake(conn net.Conn, peer *Peer) error {
 	enc := json.NewEncoder(conn)
@@ -23,4 +15,20 @@ func ReceiveHandshake(conn net.Conn) (*Peer, error) {
 	p := &Peer{}
 	err := dec.Decode(p)
 	return p, err
+}
+
+func SendPeerList(conn net.Conn, l []string) error {
+	enc := json.NewEncoder(conn)
+	return enc.Encode(l)
+}
+
+func ReceivePeerList(conn net.Conn) ([]string, error) {
+	dec := json.NewDecoder(conn)
+	l := []string{}
+	err := dec.Decode(&l)
+	return l, err
+}
+
+func isAuthorized(s *Server, p *Peer) bool {
+	return p.Version == s.Version
 }
