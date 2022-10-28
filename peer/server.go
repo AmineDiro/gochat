@@ -1,10 +1,10 @@
 package peer
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	uuid "github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -20,17 +20,17 @@ type Peer struct {
 type Server struct {
 	Peer
 	listener net.Listener
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	PeerList map[uuid.UUID]*Peer
 }
 
-func MkServer(addr string, name string) (s *Server) {
+func MkServer(addr string, name string, version string) (s *Server) {
 	s = &Server{
 		Peer: Peer{
 			Id:         uuid.New(),
 			ListenAddr: addr,
 			Name:       name,
-			Version:    "v1.0",
+			Version:    version,
 		},
 		PeerList: make(map[uuid.UUID]*Peer),
 	}
@@ -52,6 +52,22 @@ func (s *Server) StartPeer() {
 	s.listener = l
 
 	go s.ListenLoop()
+
+	// go s.status()
+}
+
+func (s *Server) status() {
+	ticker := time.NewTicker(time.Duration(2) * time.Second)
+
+	for range ticker.C {
+		s.mu.RLock()
+		n := len(s.PeerList)
+		s.mu.RUnlock()
+		log.WithFields(log.Fields{
+			"Id":             s.Id.String()[:5],
+			"ConnectedPeers": n,
+		}).Info("Peer Status")
+	}
 }
 
 func (s *Server) ListenLoop() {
@@ -72,34 +88,33 @@ func (s *Server) ListenLoop() {
 			"localAddr":  conn.LocalAddr(),
 		}).Info("Received connection: ")
 
-		go s.handshake(conn)
+		go s.authorizePeer(conn)
 	}
 }
 
-func (s *Server) handshake(conn net.Conn) {
-
-	// Server sends self
-	// Peer accepts or reject
-	// if OK : Add peer to peerlist and handle conn
-	// if NOT close conn
-	enc := json.NewEncoder(conn)
-	enc.Encode(&s.Peer)
-
-	dec := json.NewDecoder(conn)
-	p := &Peer{}
-	dec.Decode(&Peer{})
+func (s *Server) authorizePeer(conn net.Conn) error {
+	// Block and wait for response
+	p, err := ReceiveHandshake(conn)
+	if err != nil {
+		return err
+	}
 	if p.Version == s.Version {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.PeerList[p.Id] = p
+		if err := SendHandshake(conn, &s.Peer); err != nil {
+			return err
+		}
 		go s.handlePeer(conn)
 	} else {
-
 		log.WithFields(log.Fields{
 			"peer_id":        p.Id,
 			"peer_version":   p.Version,
 			"server_version": s.Version,
-		}).Info("Invalid Peer")
+		}).Errorln("Invalid Peer")
 		conn.Close()
 	}
-
+	return nil
 }
 
 func (s *Server) handlePeer(conn net.Conn) {
@@ -116,4 +131,26 @@ func (s *Server) handlePeer(conn net.Conn) {
 
 	}
 	conn.Close()
+}
+
+func (s *Server) Connect(addr string) error {
+	conn, err := net.DialTimeout("tcp", addr, time.Second*1)
+	if err != nil {
+		return err
+	}
+	SendHandshake(conn, &s.Peer)
+
+	//TODO :
+	// OK from server
+	// Not ok from server conn closed
+	p, err := ReceiveHandshake(conn)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.PeerList[p.Id] = p
+
+	return nil
 }
