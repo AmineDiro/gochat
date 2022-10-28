@@ -17,6 +17,11 @@ type Peer struct {
 	Version    string    `json:"version"`
 }
 
+func (p *Peer) String() string {
+
+	return fmt.Sprintf("ID[%s] Addr[%s]", p.Id.String()[:4], p.ListenAddr)
+}
+
 type Server struct {
 	Peer
 	listener net.Listener
@@ -64,7 +69,7 @@ func (s *Server) StartPeer() {
 }
 
 func (s *Server) status() {
-	ticker := time.NewTicker(time.Duration(3) * time.Second)
+	ticker := time.NewTicker(time.Duration(1) * time.Second)
 
 	for range ticker.C {
 		s.mu.Lock()
@@ -121,8 +126,11 @@ func (s *Server) AddPeer(conn net.Conn, p *Peer) error {
 	log.WithFields(log.Fields{
 		"server": s.ListenAddr,
 		"peer":   p.ListenAddr,
-	}).Info("Adding Peer.")
+	}).Debug("Adding Peer.")
 	s.mu.Lock()
+	if _, exists := s.connMap[p.Id]; exists {
+		return nil
+	}
 	s.PeerList = append(s.PeerList, p)
 	s.connMap[p.Id] = &conn
 	s.mu.Unlock()
@@ -214,7 +222,7 @@ func (s *Server) Connect(addr string) error {
 		"sender":            addr,
 		"received_peerlist": peerList,
 		"memory_peerlist":   s.PeerList,
-	}).Info("PeerList")
+	}).Debug("PeerList")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
