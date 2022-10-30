@@ -27,9 +27,9 @@ func main() {
 	peer4.StartPeer()
 
 	peer2.Connect(peer1.ListenAddr)
-	time.Sleep(time.Millisecond * 10)
+	time.Sleep(time.Millisecond * 1)
 	peer3.Connect(peer1.ListenAddr)
-	time.Sleep(time.Millisecond * 10)
+	time.Sleep(time.Millisecond * 1)
 	peer4.Connect(peer2.ListenAddr)
 
 	select {}

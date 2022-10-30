@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	uuid "github.com/google/uuid"
@@ -26,10 +27,11 @@ type Server struct {
 	Peer
 	listener net.Listener
 
-	mu       sync.Mutex
-	PeerList []*Peer
-	connMap  map[uuid.UUID]*net.Conn
-	tx       chan *Peer
+	mu          sync.Mutex
+	PeerList    []*Peer
+	lenPeerList uint32
+	connMap     map[uuid.UUID]*net.Conn
+	tx          chan *Peer
 }
 
 func MkServer(addr string, name string, version string) (s *Server) {
@@ -72,13 +74,10 @@ func (s *Server) status() {
 	ticker := time.NewTicker(time.Duration(1) * time.Second)
 
 	for range ticker.C {
-		s.mu.Lock()
-		n := len(s.PeerList)
-		s.mu.Unlock()
 		log.WithFields(log.Fields{
 			"Id":             s.Id.String()[:5],
 			"PeerName":       s.Name,
-			"ConnectedPeers": n,
+			"ConnectedPeers": s.lenPeerList,
 		}).Info("Peer Status")
 	}
 }
@@ -113,7 +112,7 @@ func (s *Server) handleConnection(conn net.Conn) error {
 		return err
 	}
 
-	if err := s.AddPeer(conn, p); err != nil {
+	if err := s.addPeer(conn, p); err != nil {
 		panic("Error in adding Peer")
 	}
 
@@ -122,7 +121,7 @@ func (s *Server) handleConnection(conn net.Conn) error {
 	return nil
 }
 
-func (s *Server) AddPeer(conn net.Conn, p *Peer) error {
+func (s *Server) addPeer(conn net.Conn, p *Peer) error {
 	log.WithFields(log.Fields{
 		"server": s.ListenAddr,
 		"peer":   p.ListenAddr,
@@ -134,6 +133,7 @@ func (s *Server) AddPeer(conn net.Conn, p *Peer) error {
 	s.PeerList = append(s.PeerList, p)
 	s.connMap[p.Id] = &conn
 	s.mu.Unlock()
+	atomic.AddUint32(&s.lenPeerList, 1)
 	return nil
 
 }
@@ -207,7 +207,7 @@ func (s *Server) Connect(addr string) error {
 		return err
 	}
 
-	s.AddPeer(conn, p)
+	s.addPeer(conn, p)
 
 	peerList, err := ReceivePeerList(conn)
 	if err != nil {
