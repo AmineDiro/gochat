@@ -72,6 +72,7 @@ func (s *Server) StartPeer() {
 
 	go s.ListenLoop()
 	go s.ServerLoop()
+	go s.ServerProxy()
 	if s.verbose {
 		go s.printStatus()
 	}
@@ -122,15 +123,25 @@ func (s *Server) ServerLoop() {
 		case msg := <-s.rx:
 			fmt.Println(msg)
 
-		case conn := <-s.cx:
-			go s.establishConnection(conn)
-
 		}
 	}
 }
 
+func (s *Server) ServerProxy() {
+	for conn := range s.cx {
+		if err := s.validateConn(conn); err != nil {
+			log.Info("Connection close.", err)
+		}
+
+		//TODO once validate we can exchange msg with Peer
+		// Else
+	}
+
+}
+
 // Protocol btw Peers
-func (s *Server) establishConnection(conn net.Conn) error {
+// This should be done serially to avoid race conditions
+func (s *Server) validateConn(conn net.Conn) error {
 	// Authorize Peer
 	p, err := s.authorizePeer(conn)
 	if err != nil {
@@ -142,7 +153,7 @@ func (s *Server) establishConnection(conn net.Conn) error {
 	if err := s.addPeer(conn, p); err != nil {
 		panic("Error in adding Peer")
 	}
-	// Broadcast Internal PeerList to the connected peer
+
 	s.broadcastPeerList(conn, p)
 	return nil
 }

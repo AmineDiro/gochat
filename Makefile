@@ -1,4 +1,4 @@
-BINARY_NAME=gochat
+BINARY_NAME=gochat.o
  
 all: build test
  
