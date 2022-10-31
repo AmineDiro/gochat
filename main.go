@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/aminediro/gochat/peer"
+	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -12,6 +13,7 @@ func startPeers() {
 }
 
 func main() {
+	log.SetLevel(logrus.InfoLevel)
 	log.SetFormatter(&log.TextFormatter{
 		// FullTimestamp: true,
 	})
@@ -27,10 +29,9 @@ func main() {
 	peer4.StartPeer()
 
 	peer2.Connect(peer1.ListenAddr)
-	time.Sleep(time.Millisecond * 1)
+	time.Sleep(time.Millisecond * 100)
 	peer3.Connect(peer1.ListenAddr)
-	time.Sleep(time.Millisecond * 1)
+	time.Sleep(time.Millisecond * 100)
 	peer4.Connect(peer2.ListenAddr)
-
 	select {}
 }
