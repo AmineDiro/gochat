@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/aminediro/gochat/chat"
 	uuid "github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
@@ -29,8 +30,8 @@ type Server struct {
 	listener net.Listener
 	verbose  bool
 	cx       chan net.Conn
-	rx       chan interface{}
-	tx       chan interface{}
+	rx       chan *chat.Message
+	tx       chan *chat.Message
 
 	mu          sync.Mutex
 	PeerList    []*Peer
@@ -50,8 +51,8 @@ func MkServer(c ServerConfig) (s *Server) {
 		PeerList: []*Peer{},
 		connMap:  make(map[uuid.UUID]*net.Conn),
 		cx:       make(chan net.Conn),
-		tx:       make(chan interface{}),
-		rx:       make(chan interface{}),
+		tx:       make(chan *chat.Message),
+		rx:       make(chan *chat.Message),
 	}
 
 	log.WithFields(log.Fields{
