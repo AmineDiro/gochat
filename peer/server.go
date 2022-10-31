@@ -129,7 +129,7 @@ func (s *Server) ServerLoop() {
 
 func (s *Server) ServerProxy() {
 	for conn := range s.cx {
-		if err := s.validateConn(conn); err != nil {
+		if err := s.initProtocol(conn); err != nil {
 			log.Info("Connection close.", err)
 		}
 
@@ -139,9 +139,7 @@ func (s *Server) ServerProxy() {
 
 }
 
-// Protocol btw Peers
-// This should be done serially to avoid race conditions
-func (s *Server) validateConn(conn net.Conn) error {
+func (s *Server) initProtocol(conn net.Conn) error {
 	// Authorize Peer
 	p, err := s.authorizePeer(conn)
 	if err != nil {
@@ -149,13 +147,13 @@ func (s *Server) validateConn(conn net.Conn) error {
 		return err
 	}
 
-	// TODO : Maybe move this to Sever Loop
+	// If OK Add peer
 	if err := s.addPeer(conn, p); err != nil {
 		panic("Error in adding Peer")
 	}
 
-	s.broadcastPeerList(conn, p)
-	return nil
+	// If OK Broadcast internal PeerList
+	return s.broadcastPeerList(conn, p)
 }
 
 func (s *Server) addPeer(conn net.Conn, p *Peer) error {
@@ -198,7 +196,7 @@ func (s *Server) authorizePeer(conn net.Conn) (*Peer, error) {
 	return nil, fmt.Errorf("invalid Peer")
 }
 
-func (s *Server) broadcastPeerList(conn net.Conn, newP *Peer) {
+func (s *Server) broadcastPeerList(conn net.Conn, newP *Peer) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Send the Server peerlist
@@ -210,7 +208,7 @@ func (s *Server) broadcastPeerList(conn net.Conn, newP *Peer) {
 
 	}
 	// Get connection
-	SendPeerList(conn, listAddr)
+	return SendPeerList(conn, listAddr)
 }
 
 func (s *Server) lookupAddr(addr string) bool {
