@@ -1,6 +1,14 @@
 package chat
 
-type Header string
+import "github.com/google/uuid"
+
+type Header struct {
+	MsgID      uuid.UUID `json:"id"`
+	SenderID   string    `json:"senderId"`
+	SenderName string    `json:"name"`
+	Timestamp  int64     `json:"timestamp"`
+}
+
 type Payload string
 
 type Message struct {
@@ -9,6 +17,6 @@ type Message struct {
 }
 
 type Terminal interface {
-	Input() (*Message, error)
-	Output(*Message) error
+	Input() error
+	Output() error
 }
