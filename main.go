@@ -1,37 +1,48 @@
 package main
 
 import (
-	"time"
+	"flag"
 
 	"github.com/aminediro/gochat/peer"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 )
 
-func startPeers() {
+type Peers []string
 
+func (i *Peers) String() string {
+	return "List of Peers"
+}
+
+func (ps *Peers) Set(value string) error {
+	*ps = append(*ps, value)
+	return nil
 }
 
 func main() {
-	log.SetLevel(logrus.InfoLevel)
+
+	var ps Peers
+	addr := flag.String("port", "", "Address of the Peer")
+	name := flag.String("name", "", "Peer name")
+	version := flag.String("version", "1.0", "Protocol version")
+	verbose := flag.Bool("v", false, "Protocol version")
+	flag.Var(&ps, "peers", "Peer list to connect to")
+
+	flag.Parse()
+
+	log.SetLevel(log.InfoLevel)
 	log.SetFormatter(&log.TextFormatter{
 		// FullTimestamp: true,
 	})
 
-	peer1 := peer.MkServer(":3100", "Peer1", "v1.0")
-	peer2 := peer.MkServer(":3200", "Peer2", "v1.0")
-	peer3 := peer.MkServer(":3300", "Peer3", "v1.0")
-	peer4 := peer.MkServer(":3400", "Peer4", "v1.0")
+	config := peer.ServerConfig{
+		Name:       *name,
+		ListenAddr: *addr,
+		Version:    *version,
+		Verbose:    *verbose,
+	}
+	s := peer.MkServer(config)
+	s.StartPeer()
 
-	peer1.StartPeer()
-	peer2.StartPeer()
-	peer3.StartPeer()
-	peer4.StartPeer()
-
-	peer2.Connect(peer1.ListenAddr)
-	time.Sleep(time.Millisecond * 100)
-	peer3.Connect(peer1.ListenAddr)
-	time.Sleep(time.Millisecond * 100)
-	peer4.Connect(peer2.ListenAddr)
+	s.Connect(ps...)
 	select {}
 }
