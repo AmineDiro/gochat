@@ -1,22 +1,28 @@
 package chat
 
-import "github.com/google/uuid"
+import (
+	"encoding/json"
+	"net"
 
-type Header struct {
-	MsgID      uuid.UUID `json:"id"`
-	SenderID   string    `json:"senderId"`
-	SenderName string    `json:"name"`
-	Timestamp  int64     `json:"timestamp"`
-}
-
-type Payload string
+	"github.com/google/uuid"
+)
 
 type Message struct {
-	Header  Header
-	Payload Payload
+	MsgID      uuid.UUID `json:"id"`
+	SenderID   uuid.UUID `json:"senderId"`
+	SenderName string    `json:"name"`
+	Timestamp  int64     `json:"timestamp"`
+	Payload    string    `json:"payload"`
 }
 
-type Terminal interface {
-	Input() error
-	Output() error
+func SendMessage(conn net.Conn, msg *Message) error {
+	enc := json.NewEncoder(conn)
+	return enc.Encode(msg)
+}
+
+func ReceiveMessage(conn net.Conn) (Message, error) {
+	var msg Message
+	dec := json.NewDecoder(conn)
+	err := dec.Decode(&msg)
+	return msg, err
 }

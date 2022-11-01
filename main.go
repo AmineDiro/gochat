@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 
-	"github.com/aminediro/gochat/chat"
 	"github.com/aminediro/gochat/peer"
 	log "github.com/sirupsen/logrus"
 )
@@ -47,9 +46,7 @@ func main() {
 	s.Connect(ps...)
 
 	// Start terminal
-	rx := make(chan *chat.Message)
-	tx := make(chan *chat.Message)
-	t := peer.MkTerminal(tx, rx)
+	t := peer.MkTerminal(&s.Peer, s.Rx, s.Tx)
 	t.Start()
 
 	select {}

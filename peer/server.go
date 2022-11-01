@@ -30,8 +30,8 @@ type Server struct {
 	listener net.Listener
 	verbose  bool
 	cx       chan net.Conn
-	rx       chan *chat.Message
-	tx       chan *chat.Message
+	Tx       chan *chat.Message
+	Rx       chan *chat.Message
 
 	mu          sync.Mutex
 	PeerList    []*Peer
@@ -51,8 +51,8 @@ func MkServer(c ServerConfig) (s *Server) {
 		PeerList: []*Peer{},
 		connMap:  make(map[uuid.UUID]*net.Conn),
 		cx:       make(chan net.Conn),
-		tx:       make(chan *chat.Message),
-		rx:       make(chan *chat.Message),
+		Rx:       make(chan *chat.Message),
+		Tx:       make(chan *chat.Message),
 	}
 
 	log.WithFields(log.Fields{
@@ -71,9 +71,9 @@ func (s *Server) StartPeer() {
 	}
 	s.listener = l
 
-	go s.ListenLoop()
-	go s.ServerLoop()
-	go s.ServerProxy()
+	go s.listenLoop()
+	go s.commLoop()
+	go s.serverProxy()
 	if s.verbose {
 		go s.printStatus()
 	}
@@ -89,11 +89,12 @@ func (s *Server) printStatus() {
 			"Version":        s.Version,
 			"Addr":           s.ListenAddr,
 			"ConnectedPeers": s.lenPeerList,
+			"NbConnections":  len(s.connMap),
 		}).Info("Peer Status")
 	}
 }
 
-func (s *Server) ListenLoop() {
+func (s *Server) listenLoop() {
 	log.WithFields(log.Fields{
 		"listener": s.listener.Addr().String(),
 	}).Debug("Listening for new Connections")
@@ -115,29 +116,32 @@ func (s *Server) ListenLoop() {
 	}
 }
 
-func (s *Server) ServerLoop() {
-	for {
-		select {
-		case msg := <-s.tx:
-			fmt.Println(msg)
-
-		case msg := <-s.rx:
-			fmt.Println(msg)
-
-		}
-	}
-}
-
-func (s *Server) ServerProxy() {
+func (s *Server) serverProxy() {
 	for conn := range s.cx {
 		if err := s.initProtocol(conn); err != nil {
 			log.Info("Connection close.", err)
 		}
-
-		//TODO once validate we can exchange msg with Peer
-		// Else
 	}
 
+}
+func (s *Server) commLoop() {
+	for msg := range s.Rx {
+		go s.broadcastMsg(msg)
+	}
+}
+
+func (s *Server) broadcastMsg(msg *chat.Message) {
+	for rid, conn := range s.connMap {
+		err := chat.SendMessage(*conn, msg)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"error":      err,
+				"msgID":      msg.MsgID.String(),
+				"senderId":   msg.SenderID.String(),
+				"receiverId": rid.String(),
+			}).Errorln("Error while sending")
+		}
+	}
 }
 
 func (s *Server) initProtocol(conn net.Conn) error {
@@ -150,11 +154,19 @@ func (s *Server) initProtocol(conn net.Conn) error {
 
 	// If OK Add peer
 	if err := s.addPeer(conn, p); err != nil {
-		panic("Error in adding Peer")
+		conn.Close()
+		return err
 	}
 
 	// If OK Broadcast internal PeerList
-	return s.broadcastPeerList(conn, p)
+	if err := s.broadcastPeerList(conn, p); err != nil {
+
+		conn.Close()
+		return err
+	}
+
+	go s.chatPeer(conn)
+	return nil
 }
 
 func (s *Server) addPeer(conn net.Conn, p *Peer) error {
@@ -242,7 +254,9 @@ func (s *Server) Connect(addrs ...string) error {
 			return err
 		}
 
-		s.addPeer(conn, p)
+		if err := s.addPeer(conn, p); err != nil {
+			log.Errorln("Add Peer failed : ", err)
+		}
 
 		peerList, err := ReceivePeerList(conn)
 		if err != nil {
@@ -259,30 +273,23 @@ func (s *Server) Connect(addrs ...string) error {
 			"memory_peerlist":   s.PeerList,
 		}).Debug("PeerList")
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		for _, addr := range peerList {
-			go s.Connect(addr)
-		}
+		go s.Connect(peerList...)
 
+		go s.chatPeer(conn)
 	}
 
 	return nil
 }
 
-func (s *Server) handlePeer(conn net.Conn) {
+func (s *Server) chatPeer(conn net.Conn) {
 
-	buff := make([]byte, 1024)
 	for {
-		if _, err := conn.Read(buff); err != nil {
-
-			log.Infoln("Connection closed")
+		msg, err := chat.ReceiveMessage(conn)
+		if err != nil {
+			//TODO : drop peer form peerlist
 			break
 		}
-		time.Sleep(10 * time.Second)
-		log.Infoln("%v", string(buff))
-		conn.Write([]byte("Hi back!\n"))
-
+		s.Tx <- &msg
 	}
 	conn.Close()
 }

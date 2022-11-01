@@ -1,59 +1,70 @@
 package peer
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/aminediro/gochat/chat"
+	"github.com/google/uuid"
 )
 
+type Terminal interface {
+	Input() error
+	Output() error
+}
 type PeerTerminal struct {
-	Tx chan<- *chat.Message
-	Rx <-chan *chat.Message
+	peer *Peer
+	Tx   chan<- *chat.Message
+	Rx   <-chan *chat.Message
 }
 
-func (t *PeerTerminal) Input() error {
-	var payload chat.Payload
-
-	if _, err := fmt.Scanln(&payload); err != nil {
-		return err
+func MkTerminal(p *Peer, tx chan<- *chat.Message, rx <-chan *chat.Message) *PeerTerminal {
+	return &PeerTerminal{
+		peer: p,
+		Tx:   tx,
+		Rx:   rx,
 	}
 
-	time.Now().Unix()
+}
+func (t *PeerTerminal) Input() error {
+	var payload string
+
+	in := bufio.NewReader(os.Stdin)
+
+	payload, _ = in.ReadString('\n')
+	msgID, _ := uuid.NewUUID()
 	t.Tx <- &chat.Message{
-		Header:  chat.Header{Timestamp: time.Now().Unix()},
-		Payload: payload}
+		MsgID:      msgID,
+		SenderID:   t.peer.Id,
+		SenderName: t.peer.Name,
+		Timestamp:  time.Now().Unix(),
+		Payload:    payload}
+	fmt.Printf("[%s] ", t.peer.Name)
 	return nil
 }
 
 func (t *PeerTerminal) Output() error {
 	for msg := range t.Rx {
-		fmt.Printf(">>> ")
-		if _, err := fmt.Printf("[%s] %s\n", msg.Header.SenderName, msg.Payload); err != nil {
+		if _, err := fmt.Printf("\n[%s] [%s] %s", t.peer.Name, msg.SenderName, msg.Payload); err != nil {
 			return err
 		}
+		fmt.Printf("[%s] ", t.peer.Name)
 	}
 	return nil
 }
 
 func (t *PeerTerminal) Start() {
 
+	fmt.Printf("[%s] ", t.peer.Name)
 	go func() {
-		fmt.Printf(">>> ")
 		for {
 			if err := t.Input(); err != nil {
-				panic("input error")
+				fmt.Println("inputerror", err)
 			}
 		}
 	}()
 
 	go t.Output()
-}
-
-func MkTerminal(tx chan<- *chat.Message, rx <-chan *chat.Message) *PeerTerminal {
-	return &PeerTerminal{
-		Tx: tx,
-		Rx: rx,
-	}
-
 }
