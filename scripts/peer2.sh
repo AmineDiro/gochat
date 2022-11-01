@@ -1,3 +1,3 @@
 #!/bin/bash
 make build
-./gochat.o -port :3200 -name peer2 -version 1.0  -peers :3100
+./gochat.o -port :3200 -name Alice -version 1.0  -peers :3100
