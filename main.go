@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 
 	"github.com/aminediro/gochat/chat"
 	"github.com/aminediro/gochat/peer"
@@ -47,19 +46,11 @@ func main() {
 	s.StartPeer()
 	s.Connect(ps...)
 
-	//Start terminal
+	// Start terminal
 	rx := make(chan *chat.Message)
 	tx := make(chan *chat.Message)
 	t := peer.MkTerminal(tx, rx)
 	t.Start()
-
-	go func() {
-		for msg := range tx {
-			fmt.Printf("\n<<< Received %s\n", msg.Payload)
-
-		}
-
-	}()
 
 	select {}
 }

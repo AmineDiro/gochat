@@ -15,7 +15,6 @@ type PeerTerminal struct {
 func (t *PeerTerminal) Input() error {
 	var payload chat.Payload
 
-	fmt.Printf(">>> ")
 	if _, err := fmt.Scanln(&payload); err != nil {
 		return err
 	}
@@ -29,6 +28,7 @@ func (t *PeerTerminal) Input() error {
 
 func (t *PeerTerminal) Output() error {
 	for msg := range t.Rx {
+		fmt.Printf(">>> ")
 		if _, err := fmt.Printf("[%s] %s\n", msg.Header.SenderName, msg.Payload); err != nil {
 			return err
 		}
@@ -39,6 +39,7 @@ func (t *PeerTerminal) Output() error {
 func (t *PeerTerminal) Start() {
 
 	go func() {
+		fmt.Printf(">>> ")
 		for {
 			if err := t.Input(); err != nil {
 				panic("input error")
